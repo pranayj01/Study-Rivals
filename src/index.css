@@ -1,0 +1,11 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Press+Start+2P&display=swap');
+@tailwind base; @tailwind components; @tailwind utilities;
+:root { color-scheme: dark; font-family: Inter, sans-serif; background:#080b16; color:#f3f4ff; }
+* { box-sizing:border-box } body { margin:0; min-width:320px; min-height:100vh; background:radial-gradient(circle at 15% 10%,#162154 0,transparent 28%),radial-gradient(circle at 90% 20%,#34174d 0,transparent 25%),#080b16; }
+body:before { content:""; position:fixed; inset:0; pointer-events:none; opacity:.07; background-image:linear-gradient(#fff 1px,transparent 1px),linear-gradient(90deg,#fff 1px,transparent 1px); background-size:32px 32px }
+.pixel { font-family:'Press Start 2P',monospace; letter-spacing:-.03em }
+.panel { background:linear-gradient(145deg,rgba(22,27,55,.94),rgba(12,16,34,.94)); border:1px solid rgba(138,125,255,.26); box-shadow:0 18px 50px rgba(0,0,0,.25),inset 0 1px rgba(255,255,255,.05); border-radius:18px }
+.btn { border:0; border-radius:10px; font-weight:800; cursor:pointer; transition:.18s; padding:.8rem 1rem }.btn:hover{ transform:translateY(-2px); filter:brightness(1.08) }.btn:active{transform:translateY(0)}
+.neon { box-shadow:0 0 24px rgba(82,247,212,.23) }
+.progress { height:8px; overflow:hidden; background:#090c19; border-radius:999px }.progress>i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#52f7d4,#8a7dff)}
+@media(max-width:700px){.desktop-only{display:none!important}}
