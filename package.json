@@ -9,6 +9,7 @@
     "dev:api": "tsx watch server/index.ts",
     "build": "tsc -b && vite build",
     "start": "tsx server/index.ts",
+    "start:production": "tsx server/index.ts",
     "check": "tsc -b --pretty false"
   },
   "dependencies": {
@@ -19,6 +20,8 @@
     "discord.js": "latest",
     "dotenv": "latest",
     "express": "latest",
+    "express-rate-limit": "latest",
+    "helmet": "latest",
     "jsonwebtoken": "latest",
     "lucide-react": "latest",
     "react": "latest",

@@ -1,6 +1,8 @@
 import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
+import helmet from 'helmet'
+import { rateLimit } from 'express-rate-limit'
 import http from 'node:http'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -12,6 +14,9 @@ import { Client, GatewayIntentBits } from 'discord.js'
 
 const port = Number(process.env.PORT || 3001)
 const secret = process.env.JWT_SECRET || 'development-only-change-me'
+const isProduction = process.env.NODE_ENV === 'production'
+if (isProduction && secret === 'development-only-change-me') throw new Error('JWT_SECRET must be set in production')
+const allowedOrigins = (process.env.APP_ORIGIN || '').split(',').map(value => value.trim()).filter(Boolean)
 const dataDir = path.resolve('data'); fs.mkdirSync(dataDir, { recursive: true })
 const db = new Database(path.join(dataDir, 'study-rivals.db'))
 db.pragma('journal_mode = WAL')
@@ -40,8 +45,10 @@ const auth = (req: AuthReq, res: express.Response, next: express.NextFunction) =
   try { req.userId = Number((jwt.verify((req.headers.authorization || '').replace('Bearer ', ''), secret) as { id: number }).id); next() }
   catch { res.status(401).json({ error: 'Please sign in again.' }) }
 }
-const app = express(); app.use(cors()); app.use(express.json())
-const server = http.createServer(app); const io = new Server(server, { cors: { origin: '*' } })
+const originAllowed = (origin?: string) => !origin || !isProduction || allowedOrigins.includes(origin)
+const corsOptions: cors.CorsOptions = { origin: (origin, done) => originAllowed(origin) ? done(null, true) : done(new Error('Origin not allowed')) }
+const app = express(); app.set('trust proxy', 1); app.disable('x-powered-by'); app.use(helmet({ crossOriginResourcePolicy: false })); app.use(cors(corsOptions)); app.use(express.json({ limit: '32kb' }))
+const server = http.createServer(app); const io = new Server(server, { cors: corsOptions, transports: ['websocket', 'polling'] })
 const safeUsers = () => db.prepare(`SELECT id,name,xp,streak,daily_target AS dailyTarget,status,
   (SELECT COALESCE(SUM(minutes),0) FROM sessions s WHERE s.user_id=users.id AND date(s.completed_at,'localtime')=date('now','localtime')) AS todayMinutes,
   (SELECT COUNT(*) FROM sessions s WHERE s.user_id=users.id AND datetime(s.completed_at)>=datetime('now','-6 days')) AS weekSessions
@@ -49,7 +56,9 @@ const safeUsers = () => db.prepare(`SELECT id,name,xp,streak,daily_target AS dai
 const snapshot = () => ({ users: safeUsers(), sessions: db.prepare(`SELECT s.id,s.minutes,s.completed_at AS completedAt,u.name FROM sessions s JOIN users u ON u.id=s.user_id ORDER BY s.id DESC LIMIT 12`).all(), challenges: db.prepare('SELECT * FROM challenges WHERE week_key=?').all(weekKey()), discordUrl: process.env.DISCORD_INVITE_URL || '' })
 const broadcast = () => io.emit('snapshot', snapshot())
 
-app.post('/api/login', (req, res) => {
+app.get('/api/health', (_req, res) => { db.prepare('SELECT 1').get(); res.json({ status: 'ok', service: 'study-rivals', time: new Date().toISOString() }) })
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false, message: { error: 'Too many login attempts. Try again in 15 minutes.' } })
+app.post('/api/login', loginLimiter, (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE name=?').get(req.body.name) as any
   if (!user || !bcrypt.compareSync(req.body.password || '', user.password_hash)) return res.status(401).json({ error: 'Wrong player or passcode.' })
   res.json({ token: jwt.sign({ id: user.id }, secret, { expiresIn: '30d' }), user: { id: user.id, name: user.name } })
@@ -80,4 +89,13 @@ let discord: Client | null = null
 async function discordNotify(message: string) { if (!discord || !process.env.DISCORD_CHANNEL_ID) return; try { const channel = await discord.channels.fetch(process.env.DISCORD_CHANNEL_ID); if (channel?.isTextBased() && 'send' in channel) await channel.send(message) } catch (e) { console.error('Discord notification failed', e) } }
 if (process.env.DISCORD_BOT_TOKEN) { discord = new Client({ intents: [GatewayIntentBits.Guilds] }); discord.login(process.env.DISCORD_BOT_TOKEN).catch(console.error) }
 const dist = path.resolve('dist'); if (fs.existsSync(dist)) { app.use(express.static(dist)); app.use((req,res,next) => req.method === 'GET' && !req.path.startsWith('/api') ? res.sendFile(path.join(dist,'index.html')) : next()) }
-server.listen(port, '0.0.0.0', () => console.log(`Study Rivals ready on http://0.0.0.0:${port}`))
+server.listen(port, '127.0.0.1', () => console.log(`Study Rivals ready on http://127.0.0.1:${port}`))
+
+const shutdown = (signal: string) => {
+  console.log(`${signal} received; shutting down`)
+  io.close()
+  server.close(() => { discord?.destroy(); db.close(); process.exit(0) })
+  setTimeout(() => process.exit(1), 10_000).unref()
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'))
+process.on('SIGINT', () => shutdown('SIGINT'))
