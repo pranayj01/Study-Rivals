@@ -21,18 +21,29 @@ const dataDir = path.resolve('data'); fs.mkdirSync(dataDir, { recursive: true })
 const db = new Database(path.join(dataDir, 'study-rivals.db'))
 db.pragma('journal_mode = WAL')
 db.exec(`
-CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT UNIQUE, password_hash TEXT, xp INTEGER DEFAULT 0, streak INTEGER DEFAULT 0, last_session_date TEXT, daily_target INTEGER DEFAULT 120, status TEXT DEFAULT 'offline');
+CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT UNIQUE, password_hash TEXT, xp INTEGER DEFAULT 0, streak INTEGER DEFAULT 0, last_session_date TEXT, daily_target INTEGER DEFAULT 120, status TEXT DEFAULT 'offline', player_slot INTEGER, active INTEGER DEFAULT 1);
 CREATE TABLE IF NOT EXISTS sessions (id INTEGER PRIMARY KEY, user_id INTEGER, minutes INTEGER, completed_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS challenges (id INTEGER PRIMARY KEY, title TEXT, description TEXT, xp_reward INTEGER, target INTEGER, unit TEXT, week_key TEXT, claimed_by INTEGER, completed_at TEXT);
 `)
 
-const configuredUsers = [
+const userColumns = db.prepare('PRAGMA table_info(users)').all() as { name: string }[]
+if (!userColumns.some(column => column.name === 'player_slot')) db.exec('ALTER TABLE users ADD COLUMN player_slot INTEGER')
+if (!userColumns.some(column => column.name === 'active')) db.exec('ALTER TABLE users ADD COLUMN active INTEGER DEFAULT 1')
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_player_slot ON users(player_slot) WHERE player_slot IS NOT NULL')
+
+const configuredUsers: [string, string][] = [
   [process.env.PLAYER_ONE_NAME || 'Player One', process.env.PLAYER_ONE_PASSWORD || 'focus1'],
   [process.env.PLAYER_TWO_NAME || 'Player Two', process.env.PLAYER_TWO_PASSWORD || 'focus2']
 ]
-for (const [name, password] of configuredUsers) {
-  if (!db.prepare('SELECT id FROM users WHERE name=?').get(name)) db.prepare('INSERT INTO users(name,password_hash) VALUES(?,?)').run(name, bcrypt.hashSync(password, 10))
-}
+db.transaction(() => {
+  db.prepare('UPDATE users SET player_slot=NULL,active=0,status=\'offline\'').run()
+  configuredUsers.forEach(([name, password], index) => {
+    const slot = index + 1
+    const user = db.prepare('SELECT id FROM users WHERE name=?').get(name) as { id: number } | undefined
+    if (user) db.prepare('UPDATE users SET password_hash=?,player_slot=?,active=1 WHERE id=?').run(bcrypt.hashSync(password, 10), slot, user.id)
+    else db.prepare('INSERT INTO users(name,password_hash,player_slot,active) VALUES(?,?,?,1)').run(name, bcrypt.hashSync(password, 10), slot)
+  })
+})()
 const weekKey = () => { const d = new Date(); const start = new Date(d.getFullYear(), 0, 1); return `${d.getFullYear()}-W${Math.ceil((((+d - +start) / 86400000) + start.getDay() + 1) / 7)}` }
 if (!db.prepare('SELECT id FROM challenges WHERE week_key=?').get(weekKey())) {
   const add = db.prepare('INSERT INTO challenges(title,description,xp_reward,target,unit,week_key) VALUES(?,?,?,?,?,?)')
@@ -52,14 +63,15 @@ const server = http.createServer(app); const io = new Server(server, { cors: cor
 const safeUsers = () => db.prepare(`SELECT id,name,xp,streak,daily_target AS dailyTarget,status,
   (SELECT COALESCE(SUM(minutes),0) FROM sessions s WHERE s.user_id=users.id AND date(s.completed_at,'localtime')=date('now','localtime')) AS todayMinutes,
   (SELECT COUNT(*) FROM sessions s WHERE s.user_id=users.id AND datetime(s.completed_at)>=datetime('now','-6 days')) AS weekSessions
-  FROM users ORDER BY id`).all()
+  FROM users WHERE active=1 ORDER BY player_slot`).all()
 const snapshot = () => ({ users: safeUsers(), sessions: db.prepare(`SELECT s.id,s.minutes,s.completed_at AS completedAt,u.name FROM sessions s JOIN users u ON u.id=s.user_id ORDER BY s.id DESC LIMIT 12`).all(), challenges: db.prepare('SELECT * FROM challenges WHERE week_key=?').all(weekKey()), discordUrl: process.env.DISCORD_INVITE_URL || '' })
 const broadcast = () => io.emit('snapshot', snapshot())
 
 app.get('/api/health', (_req, res) => { db.prepare('SELECT 1').get(); res.json({ status: 'ok', service: 'study-rivals', time: new Date().toISOString() }) })
+app.get('/api/players', (_req, res) => res.json({ players: (db.prepare('SELECT name FROM users WHERE active=1 ORDER BY player_slot').all() as { name: string }[]).map(user => user.name) }))
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false, message: { error: 'Too many login attempts. Try again in 15 minutes.' } })
 app.post('/api/login', loginLimiter, (req, res) => {
-  const user = db.prepare('SELECT * FROM users WHERE name=?').get(req.body.name) as any
+  const user = db.prepare('SELECT * FROM users WHERE name=? AND active=1').get(req.body.name) as any
   if (!user || !bcrypt.compareSync(req.body.password || '', user.password_hash)) return res.status(401).json({ error: 'Wrong player or passcode.' })
   res.json({ token: jwt.sign({ id: user.id }, secret, { expiresIn: '30d' }), user: { id: user.id, name: user.name } })
 })

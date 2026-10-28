@@ -1,2 +1,5 @@
 #!/data/data/com.termux/files/usr/bin/sh
-exec svlogd -tt ./main
+SERVICE_NAME="$(basename "$(dirname "$PWD")")"
+LOG_DIR="$PREFIX/var/log/sv/$SERVICE_NAME"
+mkdir -p "$LOG_DIR"
+exec svlogd -tt "$LOG_DIR"

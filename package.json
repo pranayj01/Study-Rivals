@@ -44,6 +44,6 @@
     "postcss": "latest",
     "tailwindcss": "^3.4.17",
     "tsx": "latest",
-    "typescript": "latest"
+    "typescript": "5.9.3"
   }
 }

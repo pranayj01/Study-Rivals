@@ -38,7 +38,20 @@ chmod +x deploy/termux/*.sh deploy/termux/run-*
 ./deploy/termux/install.sh "$HOME/study-rivals"
 ```
 
+The installer performs a full `pkg upgrade` first. Termux is a rolling-release environment and does not support partial upgrades; skipping this can leave Node linked against a newer C++ runtime than the one installed on the phone.
+
 If `better-sqlite3` needs to compile, the installer already supplies Python, Make, Clang, and pkg-config.
+
+Study Rivals is tested with Termux's `nodejs-lts` package. Avoid the rolling `nodejs` package (currently Node 26). Check with `node -v`; if necessary, switch before installing dependencies:
+
+```bash
+pkg uninstall nodejs
+pkg install nodejs-lts
+rm -rf node_modules
+npm ci
+```
+
+TypeScript is pinned to the portable 5.9 compiler because the newer native compiler package does not publish an Android ARM64 executable.
 
 ### 3. Configure production secrets
 

@@ -7,7 +7,12 @@ if [[ ! -f "$PROJECT_DIR/package.json" ]]; then
   exit 1
 fi
 pkg update
+pkg upgrade -y
 pkg install -y nodejs-lts python make clang pkg-config termux-services sqlite
+if [[ "$(node -p 'process.versions.node.split(`.`)[0]')" -gt 24 ]]; then
+  echo "Node $(node -v) is newer than the tested Termux LTS runtime. Install nodejs-lts before continuing." >&2
+  exit 1
+fi
 cd "$PROJECT_DIR"
 npm ci
 npm run check
