@@ -155,7 +155,9 @@ app.post('/api/timer/pause', auth, async (req: AuthReq, res) => {
 })
 app.post('/api/timer/reset', auth, (req: AuthReq, res) => {
   const mode: 'focus'|'break' = req.body.mode === 'break' ? 'break' : 'focus'
-  const duration = timerDuration(mode)
+  const requestedMinutes = Number(req.body.durationMinutes)
+  const maxMinutes = mode === 'focus' ? 240 : 120
+  const duration = Number.isFinite(requestedMinutes) ? Math.max(1, Math.min(maxMinutes, requestedMinutes)) * 60 : timerDuration(mode)
   db.prepare(`INSERT INTO timers(user_id,mode,duration_seconds,remaining_seconds,running,ends_at) VALUES(?,?,?,?,0,NULL)
     ON CONFLICT(user_id) DO UPDATE SET mode=excluded.mode,duration_seconds=excluded.duration_seconds,remaining_seconds=excluded.remaining_seconds,running=0,ends_at=NULL`).run(req.userId, mode, duration, duration)
   db.prepare('UPDATE users SET status=? WHERE id=?').run(mode === 'break' ? 'break' : 'online', req.userId)
