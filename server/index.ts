@@ -25,12 +25,17 @@ CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT UNIQUE, pass
 CREATE TABLE IF NOT EXISTS sessions (id INTEGER PRIMARY KEY, user_id INTEGER, minutes INTEGER, completed_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS challenges (id INTEGER PRIMARY KEY, title TEXT, description TEXT, xp_reward INTEGER, target INTEGER, unit TEXT, week_key TEXT, claimed_by INTEGER, completed_at TEXT);
 CREATE TABLE IF NOT EXISTS timers (user_id INTEGER PRIMARY KEY, mode TEXT NOT NULL DEFAULT 'focus', duration_seconds INTEGER NOT NULL DEFAULT 1500, remaining_seconds INTEGER NOT NULL DEFAULT 1500, running INTEGER NOT NULL DEFAULT 0, ends_at INTEGER);
+CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, title TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0, tracked_seconds INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 0, active_since INTEGER, created_at TEXT DEFAULT CURRENT_TIMESTAMP, completed_at TEXT, FOREIGN KEY(user_id) REFERENCES users(id));
 `)
 
 const userColumns = db.prepare('PRAGMA table_info(users)').all() as { name: string }[]
 if (!userColumns.some(column => column.name === 'player_slot')) db.exec('ALTER TABLE users ADD COLUMN player_slot INTEGER')
 if (!userColumns.some(column => column.name === 'active')) db.exec('ALTER TABLE users ADD COLUMN active INTEGER DEFAULT 1')
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_player_slot ON users(player_slot) WHERE player_slot IS NOT NULL')
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_active_user ON tasks(user_id) WHERE active=1')
+const timerColumns = db.prepare('PRAGMA table_info(timers)').all() as { name: string }[]
+if (!timerColumns.some(column => column.name === 'task_id')) db.exec('ALTER TABLE timers ADD COLUMN task_id INTEGER')
+if (!timerColumns.some(column => column.name === 'started_at')) db.exec('ALTER TABLE timers ADD COLUMN started_at INTEGER')
 
 const configuredUsers: [string, string][] = [
   [process.env.PLAYER_ONE_NAME || 'Player One', process.env.PLAYER_ONE_PASSWORD || 'focus1'],
@@ -67,9 +72,23 @@ const safeUsers = () => db.prepare(`SELECT users.id,users.name,users.xp,users.st
   timers.mode AS timerMode,timers.running AS timerRunning,timers.duration_seconds AS timerDurationSeconds,
   timers.remaining_seconds AS timerRemainingSeconds,timers.ends_at AS timerEndsAt
   FROM users LEFT JOIN timers ON timers.user_id=users.id WHERE users.active=1 ORDER BY users.player_slot`).all()
+const safeTasks = () => {
+  return (db.prepare(`SELECT tasks.id,tasks.user_id AS userId,users.name AS userName,tasks.title,tasks.progress,
+    tasks.tracked_seconds AS trackedSeconds,tasks.active,tasks.active_since AS activeSince,tasks.completed_at AS completedAt,
+    timers.running AS timerRunning,timers.mode AS timerMode,timers.task_id AS timerTaskId,timers.started_at AS timerStartedAt,timers.ends_at AS timerEndsAt
+    FROM tasks JOIN users ON users.id=tasks.user_id LEFT JOIN timers ON timers.user_id=tasks.user_id
+    WHERE users.active=1 ORDER BY tasks.active DESC,tasks.completed_at IS NOT NULL,tasks.id DESC`).all() as any[]).map(task => ({
+      id: task.id, userId: task.userId, userName: task.userName, title: task.title, progress: task.progress,
+      trackedSeconds: task.trackedSeconds,
+      trackingStartedAt: task.timerRunning && task.timerMode === 'focus' && task.timerTaskId === task.id ? task.timerStartedAt : null,
+      trackingEndsAt: task.timerRunning && task.timerMode === 'focus' && task.timerTaskId === task.id ? task.timerEndsAt : null,
+      active: Boolean(task.active), activeSince: task.activeSince, completedAt: task.completedAt
+    }))
+}
 const snapshot = () => ({
   users: safeUsers(),
   sessions: db.prepare(`SELECT s.id,s.minutes,s.completed_at AS completedAt,u.name FROM sessions s JOIN users u ON u.id=s.user_id ORDER BY s.id DESC LIMIT 12`).all(),
+  tasks: safeTasks(),
   studyHistory: db.prepare(`SELECT s.user_id AS userId,date(s.completed_at,'localtime') AS date,SUM(s.minutes) AS minutes
     FROM sessions s JOIN users u ON u.id=s.user_id
     WHERE u.active=1 AND date(s.completed_at,'localtime')>=date('now','localtime','-370 days')
@@ -79,7 +98,7 @@ const snapshot = () => ({
 })
 const broadcast = () => io.emit('snapshot', snapshot())
 
-type TimerRow = { user_id:number; mode:'focus'|'break'; duration_seconds:number; remaining_seconds:number; running:number; ends_at:number|null }
+type TimerRow = { user_id:number; mode:'focus'|'break'; duration_seconds:number; remaining_seconds:number; running:number; ends_at:number|null; task_id:number|null; started_at:number|null }
 const timerDuration = (mode: 'focus'|'break') => mode === 'focus' ? 25 * 60 : 5 * 60
 const ensureTimer = (userId: number) => db.prepare(`INSERT INTO timers(user_id) VALUES(?) ON CONFLICT(user_id) DO NOTHING`).run(userId)
 const publicTimer = (row: TimerRow) => ({
@@ -89,6 +108,12 @@ const publicTimer = (row: TimerRow) => ({
   running: Boolean(row.running),
   endsAt: row.ends_at
 })
+const creditTaskTime = (timer: TimerRow, stopAt = Date.now()) => {
+  if (!timer.running || timer.mode !== 'focus' || !timer.task_id || !timer.started_at) return
+  const effectiveStop = timer.ends_at ? Math.min(stopAt, timer.ends_at) : stopAt
+  const elapsed = Math.max(0, Math.floor((effectiveStop - timer.started_at) / 1000))
+  if (elapsed) db.prepare('UPDATE tasks SET tracked_seconds=tracked_seconds+? WHERE id=? AND user_id=?').run(elapsed, timer.task_id, timer.user_id)
+}
 const recordFocusSession = (userId: number, minutes: number) => {
   const today = new Date().toISOString().slice(0,10)
   const user = db.prepare('SELECT * FROM users WHERE id=?').get(userId) as any
@@ -105,12 +130,13 @@ const finalizeExpiredTimers = () => {
   for (const timer of expired) db.transaction(() => {
     const current = db.prepare('SELECT * FROM timers WHERE user_id=?').get(timer.user_id) as TimerRow | undefined
     if (!current || !current.running || !current.ends_at || current.ends_at > Date.now()) return
+    creditTaskTime(current, current.ends_at)
     if (current.mode === 'focus') {
       const minutes = Math.max(1, Math.round(current.duration_seconds / 60))
       const user = recordFocusSession(current.user_id, minutes)
       if (user) completed.push({ userName: user.name, minutes })
     }
-    db.prepare('UPDATE timers SET running=0,remaining_seconds=0,ends_at=NULL WHERE user_id=?').run(current.user_id)
+    db.prepare('UPDATE timers SET running=0,remaining_seconds=0,ends_at=NULL,task_id=NULL,started_at=NULL WHERE user_id=?').run(current.user_id)
   })()
   return completed
 }
@@ -139,7 +165,8 @@ app.post('/api/timer/start', auth, async (req: AuthReq, res) => {
   const timer = db.prepare('SELECT * FROM timers WHERE user_id=?').get(req.userId) as TimerRow
   const remaining = timer.remaining_seconds > 0 ? timer.remaining_seconds : timer.duration_seconds
   const endsAt = Date.now() + remaining * 1000
-  db.prepare('UPDATE timers SET running=1,remaining_seconds=?,ends_at=? WHERE user_id=?').run(remaining, endsAt, req.userId)
+  const activeTask = timer.mode === 'focus' ? db.prepare('SELECT id FROM tasks WHERE user_id=? AND active=1 AND completed_at IS NULL').get(req.userId) as { id:number } | undefined : undefined
+  db.prepare('UPDATE timers SET running=1,remaining_seconds=?,ends_at=?,task_id=?,started_at=? WHERE user_id=?').run(remaining, endsAt, activeTask?.id || null, Date.now(), req.userId)
   db.prepare('UPDATE users SET status=? WHERE id=?').run(timer.mode === 'focus' ? 'focusing' : 'break', req.userId)
   broadcast()
   res.json(publicTimer(db.prepare('SELECT * FROM timers WHERE user_id=?').get(req.userId) as TimerRow))
@@ -148,18 +175,22 @@ app.post('/api/timer/pause', auth, async (req: AuthReq, res) => {
   await announceCompletedTimers(); ensureTimer(req.userId!)
   const timer = db.prepare('SELECT * FROM timers WHERE user_id=?').get(req.userId) as TimerRow
   const remaining = timer.running && timer.ends_at ? Math.max(0, Math.ceil((timer.ends_at - Date.now()) / 1000)) : timer.remaining_seconds
-  db.prepare('UPDATE timers SET running=0,remaining_seconds=?,ends_at=NULL WHERE user_id=?').run(remaining, req.userId)
+  creditTaskTime(timer)
+  db.prepare('UPDATE timers SET running=0,remaining_seconds=?,ends_at=NULL,task_id=NULL,started_at=NULL WHERE user_id=?').run(remaining, req.userId)
   db.prepare("UPDATE users SET status='online' WHERE id=?").run(req.userId)
   broadcast()
   res.json(publicTimer(db.prepare('SELECT * FROM timers WHERE user_id=?').get(req.userId) as TimerRow))
 })
 app.post('/api/timer/reset', auth, (req: AuthReq, res) => {
+  ensureTimer(req.userId!)
+  const current = db.prepare('SELECT * FROM timers WHERE user_id=?').get(req.userId) as TimerRow
+  creditTaskTime(current)
   const mode: 'focus'|'break' = req.body.mode === 'break' ? 'break' : 'focus'
   const requestedMinutes = Number(req.body.durationMinutes)
   const maxMinutes = mode === 'focus' ? 240 : 120
   const duration = Number.isFinite(requestedMinutes) ? Math.max(1, Math.min(maxMinutes, requestedMinutes)) * 60 : timerDuration(mode)
-  db.prepare(`INSERT INTO timers(user_id,mode,duration_seconds,remaining_seconds,running,ends_at) VALUES(?,?,?,?,0,NULL)
-    ON CONFLICT(user_id) DO UPDATE SET mode=excluded.mode,duration_seconds=excluded.duration_seconds,remaining_seconds=excluded.remaining_seconds,running=0,ends_at=NULL`).run(req.userId, mode, duration, duration)
+  db.prepare(`INSERT INTO timers(user_id,mode,duration_seconds,remaining_seconds,running,ends_at,task_id,started_at) VALUES(?,?,?,?,0,NULL,NULL,NULL)
+    ON CONFLICT(user_id) DO UPDATE SET mode=excluded.mode,duration_seconds=excluded.duration_seconds,remaining_seconds=excluded.remaining_seconds,running=0,ends_at=NULL,task_id=NULL,started_at=NULL`).run(req.userId, mode, duration, duration)
   db.prepare('UPDATE users SET status=? WHERE id=?').run(mode === 'break' ? 'break' : 'online', req.userId)
   broadcast()
   res.json(publicTimer(db.prepare('SELECT * FROM timers WHERE user_id=?').get(req.userId) as TimerRow))
@@ -171,6 +202,53 @@ app.post('/api/sessions', auth, async (req: AuthReq, res) => {
   const user = db.transaction(() => recordFocusSession(req.userId!, minutes))()
   if (!user) return res.status(404).json({ error: 'Player not found.' })
   await discordNotify(`🎯 **${user.name}** completed a ${minutes}-minute focus session and earned **${minutes*5} XP**!`); broadcast(); res.json({ ok: true })
+})
+app.post('/api/tasks', auth, (req: AuthReq, res) => {
+  const title = String(req.body.title || '').trim().slice(0, 120)
+  if (!title) return res.status(400).json({ error: 'Task title is required.' })
+  const count = (db.prepare('SELECT COUNT(*) count FROM tasks WHERE user_id=? AND completed_at IS NULL').get(req.userId) as { count:number }).count
+  if (count >= 30) return res.status(400).json({ error: 'Complete or remove an active task before adding more.' })
+  const result = db.prepare('INSERT INTO tasks(user_id,title) VALUES(?,?)').run(req.userId, title)
+  broadcast(); res.status(201).json({ id: result.lastInsertRowid })
+})
+app.patch('/api/tasks/:id', auth, (req: AuthReq, res) => {
+  const task = db.prepare('SELECT * FROM tasks WHERE id=? AND user_id=?').get(req.params.id, req.userId) as any
+  if (!task) return res.status(404).json({ error: 'Task not found.' })
+  const title = req.body.title === undefined ? task.title : String(req.body.title).trim().slice(0, 120)
+  const progress = Math.max(0, Math.min(100, Number(req.body.progress ?? task.progress)))
+  if (!title) return res.status(400).json({ error: 'Task title is required.' })
+  const completedAt = progress >= 100 ? new Date().toISOString() : null
+  db.transaction(() => {
+    if (completedAt) {
+      const timer = db.prepare('SELECT * FROM timers WHERE user_id=?').get(req.userId) as TimerRow | undefined
+      if (timer && timer.task_id === task.id) { creditTaskTime(timer); db.prepare('UPDATE timers SET task_id=NULL,started_at=NULL WHERE user_id=?').run(req.userId) }
+    }
+    db.prepare('UPDATE tasks SET title=?,progress=?,completed_at=?,active=CASE WHEN ? IS NULL THEN active ELSE 0 END,active_since=CASE WHEN ? IS NULL THEN active_since ELSE NULL END WHERE id=?').run(title, progress, completedAt, completedAt, completedAt, task.id)
+  })()
+  broadcast(); res.json({ ok: true })
+})
+app.post('/api/tasks/:id/select', auth, (req: AuthReq, res) => {
+  const task = db.prepare('SELECT * FROM tasks WHERE id=? AND user_id=? AND completed_at IS NULL').get(req.params.id, req.userId) as any
+  if (!task) return res.status(404).json({ error: 'Active task not found.' })
+  db.transaction(() => {
+    ensureTimer(req.userId!)
+    const timer = db.prepare('SELECT * FROM timers WHERE user_id=?').get(req.userId) as TimerRow
+    creditTaskTime(timer)
+    db.prepare('UPDATE tasks SET active=0,active_since=NULL WHERE user_id=?').run(req.userId)
+    db.prepare('UPDATE tasks SET active=1,active_since=? WHERE id=?').run(Date.now(), task.id)
+    if (timer.running && timer.mode === 'focus') db.prepare('UPDATE timers SET task_id=?,started_at=? WHERE user_id=?').run(task.id, Date.now(), req.userId)
+  })()
+  broadcast(); res.json({ ok: true })
+})
+app.delete('/api/tasks/:id', auth, (req: AuthReq, res) => {
+  const task = db.prepare('SELECT * FROM tasks WHERE id=? AND user_id=?').get(req.params.id, req.userId) as any
+  if (!task) return res.status(404).json({ error: 'Task not found.' })
+  db.transaction(() => {
+    const timer = db.prepare('SELECT * FROM timers WHERE user_id=?').get(req.userId) as TimerRow | undefined
+    if (timer && timer.task_id === task.id) { creditTaskTime(timer); db.prepare('UPDATE timers SET task_id=NULL,started_at=NULL WHERE user_id=?').run(req.userId) }
+    db.prepare('DELETE FROM tasks WHERE id=?').run(task.id)
+  })()
+  broadcast(); res.json({ ok: true })
 })
 app.post('/api/challenges/:id/claim', auth, async (req: AuthReq, res) => {
   const challenge = db.prepare('SELECT * FROM challenges WHERE id=? AND claimed_by IS NULL').get(req.params.id) as any
