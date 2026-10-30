@@ -25,7 +25,7 @@ The production setup binds Study Rivals only to `127.0.0.1:3001`. Cloudflare Tun
 From the PC, with the phone reachable over SSH:
 
 ```bash
-scp -r "D:/Study Rivals" PHONE_USER@PHONE_IP:~/study-rivals
+scp -r "D:/Study Rivals" PHONE_USER@PHONE_IP:~/Study-Rivals
 ```
 
 Do not copy the PC's `node_modules`; if it was included, remove that directory on the phone before installation because native modules must be built for Android.
@@ -33,9 +33,9 @@ Do not copy the PC's `node_modules`; if it was included, remove that directory o
 ### 2. Install and build in Termux
 
 ```bash
-cd ~/study-rivals
+cd ~/Study-Rivals
 chmod +x deploy/termux/*.sh deploy/termux/run-*
-./deploy/termux/install.sh "$HOME/study-rivals"
+./deploy/termux/install.sh "$HOME/Study-Rivals"
 ```
 
 The installer performs a full `pkg upgrade` first. Termux is a rolling-release environment and does not support partial upgrades; skipping this can leave Node linked against a newer C++ runtime than the one installed on the phone.
@@ -104,7 +104,7 @@ Both should return `{"status":"ok",...}`. Socket.IO uses the same hostname and i
 Copy or pull the updated source, then:
 
 ```bash
-cd ~/study-rivals
+cd ~/Study-Rivals
 npm ci
 npm run check
 npm run build

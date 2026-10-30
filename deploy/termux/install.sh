@@ -1,6 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
 set -euo pipefail
-PROJECT_DIR="${1:-$HOME/study-rivals}"
+PROJECT_DIR="${1:-$HOME/Study-Rivals}"
 if [[ ! -f "$PROJECT_DIR/package.json" ]]; then
   echo "Study Rivals was not found at: $PROJECT_DIR" >&2
   echo "Copy the project there first, or pass its path as the first argument." >&2

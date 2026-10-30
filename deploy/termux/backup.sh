@@ -1,6 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
 set -euo pipefail
-PROJECT_DIR="${STUDY_RIVALS_DIR:-$HOME/study-rivals}"
+PROJECT_DIR="${STUDY_RIVALS_DIR:-$HOME/Study-Rivals}"
 BACKUP_DIR="$PROJECT_DIR/backups"
 mkdir -p "$BACKUP_DIR"
 stamp="$(date +%Y%m%d-%H%M%S)"

@@ -1,6 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
 set -euo pipefail
-PROJECT_DIR="${STUDY_RIVALS_DIR:-$HOME/study-rivals}"
+PROJECT_DIR="${STUDY_RIVALS_DIR:-$HOME/Study-Rivals}"
 ENV_FILE="$PROJECT_DIR/deploy/termux/env"
 if [[ ! -r "$ENV_FILE" ]]; then
   echo "Missing $ENV_FILE. Add CLOUDFLARE_TUNNEL_TOKEN and chmod 600 it." >&2

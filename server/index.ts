@@ -61,11 +61,22 @@ const originAllowed = (origin?: string) => !origin || !isProduction || allowedOr
 const corsOptions: cors.CorsOptions = { origin: (origin, done) => originAllowed(origin) ? done(null, true) : done(new Error('Origin not allowed')) }
 const app = express(); app.set('trust proxy', 1); app.disable('x-powered-by'); app.use(helmet({ crossOriginResourcePolicy: false })); app.use(cors(corsOptions)); app.use(express.json({ limit: '32kb' }))
 const server = http.createServer(app); const io = new Server(server, { cors: corsOptions, transports: ['websocket', 'polling'] })
-const safeUsers = () => db.prepare(`SELECT id,name,xp,streak,daily_target AS dailyTarget,status,
+const safeUsers = () => db.prepare(`SELECT users.id,users.name,users.xp,users.streak,users.daily_target AS dailyTarget,users.status,
   (SELECT COALESCE(SUM(minutes),0) FROM sessions s WHERE s.user_id=users.id AND date(s.completed_at,'localtime')=date('now','localtime')) AS todayMinutes,
-  (SELECT COUNT(*) FROM sessions s WHERE s.user_id=users.id AND datetime(s.completed_at)>=datetime('now','-6 days')) AS weekSessions
-  FROM users WHERE active=1 ORDER BY player_slot`).all()
-const snapshot = () => ({ users: safeUsers(), sessions: db.prepare(`SELECT s.id,s.minutes,s.completed_at AS completedAt,u.name FROM sessions s JOIN users u ON u.id=s.user_id ORDER BY s.id DESC LIMIT 12`).all(), challenges: db.prepare('SELECT * FROM challenges WHERE week_key=?').all(weekKey()), discordUrl: process.env.DISCORD_INVITE_URL || '' })
+  (SELECT COUNT(*) FROM sessions s WHERE s.user_id=users.id AND datetime(s.completed_at)>=datetime('now','-6 days')) AS weekSessions,
+  timers.mode AS timerMode,timers.running AS timerRunning,timers.duration_seconds AS timerDurationSeconds,
+  timers.remaining_seconds AS timerRemainingSeconds,timers.ends_at AS timerEndsAt
+  FROM users LEFT JOIN timers ON timers.user_id=users.id WHERE users.active=1 ORDER BY users.player_slot`).all()
+const snapshot = () => ({
+  users: safeUsers(),
+  sessions: db.prepare(`SELECT s.id,s.minutes,s.completed_at AS completedAt,u.name FROM sessions s JOIN users u ON u.id=s.user_id ORDER BY s.id DESC LIMIT 12`).all(),
+  studyHistory: db.prepare(`SELECT s.user_id AS userId,date(s.completed_at,'localtime') AS date,SUM(s.minutes) AS minutes
+    FROM sessions s JOIN users u ON u.id=s.user_id
+    WHERE u.active=1 AND date(s.completed_at,'localtime')>=date('now','localtime','-370 days')
+    GROUP BY s.user_id,date(s.completed_at,'localtime') ORDER BY date`).all(),
+  challenges: db.prepare('SELECT * FROM challenges WHERE week_key=?').all(weekKey()),
+  discordUrl: process.env.DISCORD_INVITE_URL || ''
+})
 const broadcast = () => io.emit('snapshot', snapshot())
 
 type TimerRow = { user_id:number; mode:'focus'|'break'; duration_seconds:number; remaining_seconds:number; running:number; ends_at:number|null }

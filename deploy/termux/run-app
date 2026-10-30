@@ -1,6 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
 set -euo pipefail
-PROJECT_DIR="${STUDY_RIVALS_DIR:-$HOME/study-rivals}"
+PROJECT_DIR="${STUDY_RIVALS_DIR:-$HOME/Study-Rivals}"
 cd "$PROJECT_DIR"
 export NODE_ENV=production
 export TZ="${TZ:-Asia/Kolkata}"
