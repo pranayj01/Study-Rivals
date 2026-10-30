@@ -1,11 +1,26 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Press+Start+2P&display=swap');
 @tailwind base; @tailwind components; @tailwind utilities;
-:root { color-scheme: dark; font-family: Inter, sans-serif; background:#080b16; color:#f3f4ff; }
-* { box-sizing:border-box } body { margin:0; min-width:320px; min-height:100vh; background:radial-gradient(circle at 15% 10%,#162154 0,transparent 28%),radial-gradient(circle at 90% 20%,#34174d 0,transparent 25%),#080b16; }
+:root { color-scheme: dark; font-family: Inter, sans-serif; background:#080b20; color:#fff8ee; --arcade-pink:#ff1f82; --arcade-orange:#ff7043; --arcade-yellow:#ffd84a; --arcade-blue:#2b8cb8; --arcade-navy:#080b20; }
+* { box-sizing:border-box } body { margin:0; min-width:320px; min-height:100vh; background:radial-gradient(circle at 15% 10%,rgba(43,140,184,.28) 0,transparent 30%),radial-gradient(circle at 90% 18%,rgba(255,31,130,.18) 0,transparent 28%),radial-gradient(circle at 55% 100%,rgba(255,112,67,.10) 0,transparent 30%),#080b20; }
 body:before { content:""; position:fixed; inset:0; pointer-events:none; opacity:.07; background-image:linear-gradient(#fff 1px,transparent 1px),linear-gradient(90deg,#fff 1px,transparent 1px); background-size:32px 32px }
 .pixel { font-family:'Press Start 2P',monospace; letter-spacing:-.03em }
-.panel { background:linear-gradient(145deg,rgba(22,27,55,.94),rgba(12,16,34,.94)); border:1px solid rgba(138,125,255,.26); box-shadow:0 18px 50px rgba(0,0,0,.25),inset 0 1px rgba(255,255,255,.05); border-radius:18px }
+.arcade-title { display:inline-block; font-family:'Press Start 2P',monospace; font-weight:400; background:linear-gradient(180deg,#ff1f82 5%,#f72d78 34%,#ff7043 65%,#ffd84a 92%); background-clip:text; -webkit-background-clip:text; color:#ff7043; -webkit-text-fill-color:transparent; -webkit-text-stroke:1px #173778; filter:drop-shadow(0 2px 0 #07163f) drop-shadow(2px 3px 0 #2b8cb8); letter-spacing:-.03em; line-height:1.35 }
+.arcade-title-hero { font-size:clamp(2.1rem,9vw,3.1rem) }
+.arcade-title-compact { font-size:25px; -webkit-text-stroke:.5px #173778; filter:drop-shadow(0 1px 0 #07163f) drop-shadow(1px 2px 0 #2b8cb8); letter-spacing:-.03em }
+.panel { background:linear-gradient(145deg,rgba(18,25,65,.95),rgba(10,13,38,.96)); border:1px solid rgba(43,140,184,.34); box-shadow:0 18px 50px rgba(0,0,0,.28),inset 0 1px rgba(255,216,74,.06); border-radius:18px }
 .btn { border:0; border-radius:10px; font-weight:800; cursor:pointer; transition:.18s; padding:.8rem 1rem }.btn:hover{ transform:translateY(-2px); filter:brightness(1.08) }.btn:active{transform:translateY(0)}
-.neon { box-shadow:0 0 24px rgba(82,247,212,.23) }
-.progress { height:8px; overflow:hidden; background:#090c19; border-radius:999px }.progress>i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#52f7d4,#8a7dff)}
+.neon { box-shadow:0 0 26px rgba(43,140,184,.24),0 0 50px rgba(255,31,130,.10) }
+.progress { height:8px; overflow:hidden; background:#07091c; border-radius:999px }.progress>i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--arcade-yellow),var(--arcade-orange),var(--arcade-pink))}
+[class*="text-[#52f7d4]"] { color:var(--arcade-yellow)!important }
+[class*="text-[#8a7dff]"] { color:var(--arcade-pink)!important }
+[class*="text-[#ff5d8f]"] { color:var(--arcade-orange)!important }
+[class*="text-[#ffdd57]"] { color:var(--arcade-yellow)!important }
+[class~="bg-[#52f7d4]"] { background-color:var(--arcade-blue)!important; color:#fff!important }
+[class~="bg-[#8a7dff]"] { background-color:var(--arcade-pink)!important; color:#fff!important }
+[class~="bg-[#ff5d8f]"] { background-color:var(--arcade-orange)!important; color:#fff!important }
+[class~="bg-[#ffdd57]"] { background-color:var(--arcade-pink)!important; color:#fff!important }
+[class*="border-[#343c66]"],[class*="border-[#2c3358]"],[class*="border-[#2b3154]"] { border-color:rgba(43,140,184,.42)!important }
+[class*="focus:border-[#52f7d4]"]:focus { border-color:var(--arcade-yellow)!important }
+.player-avatar-self { background:linear-gradient(145deg,#ff9a45,#ff7043); color:#fff; box-shadow:0 0 18px rgba(255,112,67,.22) }
+.player-avatar-rival { background:linear-gradient(145deg,#ff4a9b,#ff1f82); color:#fff; box-shadow:0 0 18px rgba(255,31,130,.22) }
 @media(max-width:700px){.desktop-only{display:none!important}}
